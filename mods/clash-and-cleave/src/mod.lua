@@ -1,4 +1,4 @@
--- Clash & Cleave 0.2.0 prototype (client side only for now).
+-- Clash & Cleave 0.3.1 prototype (client side only for now).
 --
 --   * Swing cancel: vanilla locks block and dodge from the wind-up through the recovery. Here the
 --     lock covers only the swing itself: from SWING_LEAD_MS before the first hit to RECOVERY_MS
@@ -8,9 +8,9 @@
 --     removes the locks entirely.
 --   * Armour defence: multiplies every armour piece's armorSetup.distribution. The classes keep
 --     their vanilla split (Warrior physical, Mage magical, Ranger even).
---   * Poise: gives every armour piece and shield poise points and exports them with the rules
---     for the native DLL, which spends and refills the pool. The game has no armour class, only
---     item names: Warrior is heavy, Ranger medium, Mage light. See poise_class.
+--   * Poise and dodge cost: gives every armour piece and shield poise and dodge points and exports
+--     them with the rules for the native DLL. The game has no armour class, only item names:
+--     Warrior is heavy, Ranger medium, Mage light. See poise_class.
 --
 -- Runs after Forged & Found (optional dependency), so its armour variants are covered too.
 
@@ -27,11 +27,12 @@ local SWING_CANCEL = feature("swingCancel")
 local ARMOUR_DEFENCE = feature("armourDefence")
 local ARMOUR_MULTIPLIER = tonumber(shroudforge.settings.get("armourDefenceMultiplier", 1.25)) or 1.25
 local POISE = feature("poise")
+local DODGE_BY_ARMOUR = feature("dodgeByArmour")
 
 local function number_setting(key, fallback) return tonumber(shroudforge.settings.get(key, fallback)) or fallback end
 
-log(string.format("features: swing cancel %s, armour defence %s (x%.2f), poise %s", SWING_CANCEL and "on" or "off",
-    ARMOUR_DEFENCE and "on" or "off", ARMOUR_MULTIPLIER, POISE and "on" or "off"))
+log(string.format("features: swing cancel %s, armour defence %s (x%.2f), poise %s, dodge cost by armour %s", SWING_CANCEL and "on" or "off",
+    ARMOUR_DEFENCE and "on" or "off", ARMOUR_MULTIPLIER, POISE and "on" or "off", DODGE_BY_ARMOUR and "on" or "off"))
 
 local MS = 1000000 -- sequence times are nanoseconds
 local SWING_LEAD_MS = 150
@@ -228,10 +229,12 @@ local function export_poise()
         light = number_setting("poiseLightArmour", 3), shield = number_setting("poiseShield", 30) }
     local counts = { heavy = 0, medium = 0, light = 0, shield = 0, two_handed = 0 }
     points.two_handed = -1 -- marks the weapon for the DLL: a shield gives no poise with it
-    local lines = { string.format("poise %d light=%d medium=%d heavy=%d refill=%d", POISE and 1 or 0,
+    local dodge = { heavy = number_setting("dodgeHeavyPiece", 7), medium = number_setting("dodgeMediumPiece", 3),
+        light = number_setting("dodgeLightPiece", 2), shield = 0, two_handed = 0 }
+    local lines = { string.format("poise %d light=%d medium=%d heavy=%d refill=%d dodge %d minimum=%d", POISE and 1 or 0,
         number_setting("poiseLightHit", 5), number_setting("poiseMediumHit", 10), number_setting("poiseHeavyHit", 50),
-        math.floor(number_setting("poiseRefillSeconds", 3) * 1000)) }
-    if POISE then
+        math.floor(number_setting("poiseRefillSeconds", 3) * 1000), DODGE_BY_ARMOUR and 1 or 0, number_setting("dodgeMinimum", 5)) }
+    if POISE or DODGE_BY_ARMOUR then
         for _, registry in ipairs(game.assets.get_resources_by_type("keen::ItemRegistryResource")) do
             local data = registry.data
             for i, name in ipairs(data.dbgNames) do
@@ -246,7 +249,7 @@ local function export_poise()
                     local text = tostring(game.assets.get_resource(data.itemRefs[i], "keen::ItemInfo").data)
                     local id = text:match('^{"itemId":{"value":(%d+)}')
                     if not id then error("clash-and-cleave: no item id for " .. name) end
-                    lines[#lines + 1] = id .. " " .. math.floor(points[kind])
+                    lines[#lines + 1] = id .. " " .. math.floor(points[kind]) .. " " .. math.floor(dodge[kind])
                     counts[kind] = counts[kind] + 1
                 end
             end

@@ -177,6 +177,79 @@
       "applyAt": "restart",
       "restartRequired": true,
       "assetPreparation": true
+    },
+    "dodgeByArmour": {
+      "value": false,
+      "label": "Dodge cost by armour",
+      "description": "The stamina cost of a dodge depends on what you wear: each armour piece adds to it, so heavy armour costs more and light armour less. The game still asks for its usual stamina before you can dodge.",
+      "control": "toggle",
+      "applyAt": "restart",
+      "restartRequired": true,
+      "assetPreparation": true
+    },
+    "dodgeHeavyPiece": {
+      "value": 7,
+      "label": "Heavy armour piece",
+      "description": "Dodge stamina from each heavy piece. Vanilla dodge: 20.",
+      "control": "slider",
+      "min": 0,
+      "max": 10,
+      "step": 1,
+      "enabledWhen": {
+        "setting": "dodgeByArmour",
+        "equals": true
+      },
+      "applyAt": "restart",
+      "restartRequired": true,
+      "assetPreparation": true
+    },
+    "dodgeMediumPiece": {
+      "value": 3,
+      "label": "Medium armour piece",
+      "description": "Dodge stamina from each medium piece.",
+      "control": "slider",
+      "min": 0,
+      "max": 10,
+      "step": 1,
+      "enabledWhen": {
+        "setting": "dodgeByArmour",
+        "equals": true
+      },
+      "applyAt": "restart",
+      "restartRequired": true,
+      "assetPreparation": true
+    },
+    "dodgeLightPiece": {
+      "value": 2,
+      "label": "Light armour piece",
+      "description": "Dodge stamina from each light piece.",
+      "control": "slider",
+      "min": 0,
+      "max": 10,
+      "step": 1,
+      "enabledWhen": {
+        "setting": "dodgeByArmour",
+        "equals": true
+      },
+      "applyAt": "restart",
+      "restartRequired": true,
+      "assetPreparation": true
+    },
+    "dodgeMinimum": {
+      "value": 5,
+      "label": "Minimum dodge cost",
+      "description": "The least a dodge can cost, with little or no armour.",
+      "control": "slider",
+      "min": 0,
+      "max": 20,
+      "step": 1,
+      "enabledWhen": {
+        "setting": "dodgeByArmour",
+        "equals": true
+      },
+      "applyAt": "restart",
+      "restartRequired": true,
+      "assetPreparation": true
     }
   }
 }
