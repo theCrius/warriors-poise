@@ -1,6 +1,6 @@
 # Build output
 native/build/
-mods/clash-and-cleave/bin/
+mods/warriors-poise/bin/
 dist/
 
 # Private workspace: notes, research and local tools

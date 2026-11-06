@@ -1,4 +1,4 @@
--- Clash & Cleave 0.4.0 prototype (client and dedicated server, install it on both).
+-- Warriors' Poise 0.5.0 beta (client and dedicated server, install it on both).
 --
 --   * Swing cancel: vanilla locks block and dodge from the wind-up through the recovery. Here the
 --     lock covers only the swing itself: from SWING_LEAD_MS before the first hit to RECOVERY_MS
@@ -18,8 +18,8 @@
 -- then starts on vanilla data, and vanilla data deletes Forged & Found's variant items. error() is
 -- kept for a change that went wrong halfway, where the data would otherwise be left inconsistent.
 
-local function log(msg) shroudforge.log.info("[clash-and-cleave] " .. msg) end
-local function warn_feature(msg) shroudforge.log.warn("[clash-and-cleave] " .. msg) end
+local function log(msg) shroudforge.log.info("[warriors-poise] " .. msg) end
+local function warn_feature(msg) shroudforge.log.warn("[warriors-poise] " .. msg) end
 
 if not loader.features.patch then
     log("no patch access in this phase, nothing to do")
@@ -161,10 +161,10 @@ local function patch_swing_cancel()
                         insert_lock_event(events, plan.disable_source, plan.from)
                         insert_lock_event(events, plan.enable_source, plan.to)
                         if not times_sorted(events) then
-                            error("clash-and-cleave: " .. sub.name .. " events are out of order")
+                            error("warriors-poise: " .. sub.name .. " events are out of order")
                         end
                         if plan.disable_source.value.time.value ~= source_time then
-                            error("clash-and-cleave: inserting into " .. sub.name .. " changed the original event")
+                            error("warriors-poise: inserting into " .. sub.name .. " changed the original event")
                         end
                         changed = changed + 1
                         freed = freed + (plan.vanilla_end - plan.first_off) - (plan.to - plan.from)
@@ -262,7 +262,7 @@ local function export_poise()
         end
         if counts.heavy == 0 or counts.shield == 0 then warn_feature("poise found no armour or no shields here") end
     end
-    io.export("clash-and-cleave/poise.txt", table.concat(lines, "\n") .. "\n")
+    io.export("warriors-poise/poise.txt", table.concat(lines, "\n") .. "\n")
     log(string.format("poise: %d heavy, %d medium, %d light pieces, %d shields, %d two-handed weapons exported", counts.heavy,
         counts.medium, counts.light, counts.shield, counts.two_handed))
 end

@@ -1,8 +1,8 @@
-// clash-and-cleave-native 0.4.0: armour-based poise. Every worn armour piece and shield adds
+// warriors-poise-native 0.5.0: armour-based poise. Every worn armour piece and shield adds
 // points to a pool, every Light, Medium or Heavy hit removes some. While points remain the hit
 // only makes the character twitch; when they run out it lands as usual. The pool refills after
 // a few seconds without a poise hit. The data mod assigns the points per item and exports them
-// with the rules to <game>/shroudforge/exports/clash-and-cleave/poise.txt.
+// with the rules to <game>/shroudforge/exports/warriors-poise/poise.txt.
 //
 // Where: the code that fills a keen::ecs::HitEvent, at the store of its hitReaction. That spot is
 // inside a function fragment with no entry of its own, so it is patched in place. The byte
@@ -16,7 +16,7 @@
 // game's own getter (game 1287369: client +0x9BF460, server +0x65B2F0) and ShroudForge's ecsReadLayout. The component's
 // index differs per build, so it is found by its size instead.
 //
-// Log: <game>/shroudforge/logs/clash-and-cleave-native.log. Nothing is written into the mod folder.
+// Log: <game>/shroudforge/logs/warriors-poise-native.log, one session. Nothing is written into the mod folder.
 #include <windows.h>
 
 #include <cstdint>
@@ -26,7 +26,7 @@
 
 namespace {
 
-constexpr char kVersion[] = "0.4.0";
+constexpr char kVersion[] = "0.5.0";
 
 // mov [rbx+0BCh],esi / mov [rbx+0E0h],r12w / mov eax,[r13+0B8h]
 const unsigned char kHitSite[] = {0x89, 0xB3, 0xBC, 0x00, 0x00, 0x00, 0x66, 0x44, 0x89, 0xA3, 0xE0,
@@ -316,7 +316,8 @@ void open_log() {
     if (!slash) return;
     *slash = 0;
     wchar_t file[MAX_PATH];
-    if (swprintf(file, MAX_PATH, L"%s\\shroudforge\\logs\\clash-and-cleave-native.log", path) <= 0) return;
+    if (swprintf(file, MAX_PATH, L"%s\\shroudforge\\logs\\warriors-poise-native.log", path) <= 0) return;
+    DeleteFileW(file);  // one session only, so the log cannot grow without end
     g_log = CreateFileW(file, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 }
 
@@ -329,7 +330,7 @@ void load_rules() {
     if (!slash) return;
     *slash = 0;
     wchar_t file[MAX_PATH];
-    if (swprintf(file, MAX_PATH, L"%s\\shroudforge\\exports\\clash-and-cleave\\poise.txt", path) <= 0) return;
+    if (swprintf(file, MAX_PATH, L"%s\\shroudforge\\exports\\warriors-poise\\poise.txt", path) <= 0) return;
     FILE* f = nullptr;
     if (_wfopen_s(&f, file, L"r") != 0 || !f) {
         log_line("poise off: no poise.txt export");
@@ -361,7 +362,7 @@ void start() {
     GetModuleFileNameA(nullptr, host, MAX_PATH);
     const char* name = strrchr(host, '\\');
     char text[MAX_PATH + 96];
-    snprintf(text, sizeof text, "clash-and-cleave-native %s loaded in %s, PE TimeDateStamp 0x%08X", kVersion, name ? name + 1 : host,
+    snprintf(text, sizeof text, "warriors-poise-native %s loaded in %s, PE TimeDateStamp 0x%08X", kVersion, name ? name + 1 : host,
              nt->FileHeader.TimeDateStamp);
     log_line(text);
     load_rules();

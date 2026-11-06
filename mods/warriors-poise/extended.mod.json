@@ -102,7 +102,7 @@
     "poiseShield": {
       "value": 30,
       "label": "Shield",
-      "description": "Poise from an equipped shield, raised or not.",
+      "description": "Poise from an equipped shield, raised or not. Two-handed weapons get none.",
       "control": "slider",
       "min": 0,
       "max": 100,

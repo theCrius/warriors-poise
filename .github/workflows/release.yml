@@ -1,0 +1,39 @@
+# Builds the mod on Windows (MSVC) and packages the release zip.
+# Push a tag v<version> (matching mods/warriors-poise/mod.json) to publish a GitHub release;
+# run it manually (Actions tab) to get the zip as a build artifact only.
+# Releases are published as normal (not pre-) releases, so GitHub's fixed links
+# .../releases/latest and .../releases/latest/download/warriors-poise.zip follow them.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and package
+        shell: pwsh
+        run: ./tools/package.ps1
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: warriors-poise
+          path: dist/*.zip
+
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zips = (Get-ChildItem dist/*.zip).FullName
+          gh release create "${{ github.ref_name }}" $zips --title "Warriors' Poise ${{ github.ref_name }}" --generate-notes --latest

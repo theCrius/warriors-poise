@@ -1,0 +1,11 @@
+{
+  "id": "warriors-poise",
+  "name": "Warriors' Poise (beta)",
+  "version": "0.5.0",
+  "description": "BETA. A melee combat rework: poise from your armour and shield, stronger armour, and swings you can cancel during the wind-up. Each feature is a switch, all off by default. On a dedicated server, install it on the server and on every client.",
+  "authors": ["Crius"],
+  "dependencies": [
+    { "id": "forged-and-found", "version": ">=0.14.0", "optional": true }
+  ],
+  "capabilities": ["patch", "export"]
+}
