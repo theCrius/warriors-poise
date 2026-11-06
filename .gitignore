@@ -1,0 +1,17 @@
+# Build output
+native/build/
+mods/clash-and-cleave/bin/
+dist/
+
+# Private workspace: notes, research and local tools
+CLAUDE.md
+.claude/
+devlog/
+research/
+tools/iced/
+mods/combat-dump/
+
+# Editor / OS noise
+.vscode/
+*.tmp
+Thumbs.db

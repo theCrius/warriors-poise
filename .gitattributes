@@ -1,0 +1,3 @@
+# Text files are checked out with LF everywhere (also on a Windows CI machine), so a
+# release contains exactly the bytes that were tested.
+* text=auto eol=lf
