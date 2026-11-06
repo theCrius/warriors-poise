@@ -1,4 +1,4 @@
--- Clash & Cleave 0.3.1 prototype (client side only for now).
+-- Clash & Cleave 0.4.0 prototype (client and dedicated server, install it on both).
 --
 --   * Swing cancel: vanilla locks block and dodge from the wind-up through the recovery. Here the
 --     lock covers only the swing itself: from SWING_LEAD_MS before the first hit to RECOVERY_MS
@@ -8,13 +8,18 @@
 --     removes the locks entirely.
 --   * Armour defence: multiplies every armour piece's armorSetup.distribution. The classes keep
 --     their vanilla split (Warrior physical, Mage magical, Ranger even).
---   * Poise and dodge cost: gives every armour piece and shield poise and dodge points and exports
---     them with the rules for the native DLL. The game has no armour class, only item names:
---     Warrior is heavy, Ranger medium, Mage light. See poise_class.
+--   * Poise: gives every armour piece and shield poise points and exports them with the rules
+--     for the native DLL, which spends and refills the pool. The game has no armour class, only
+--     item names: Warrior is heavy, Ranger medium, Mage light. See poise_class.
 --
 -- Runs after Forged & Found (optional dependency), so its armour variants are covered too.
+--
+-- A feature that finds nothing to change only warns: error() fails the whole asset pass, the game
+-- then starts on vanilla data, and vanilla data deletes Forged & Found's variant items. error() is
+-- kept for a change that went wrong halfway, where the data would otherwise be left inconsistent.
 
 local function log(msg) shroudforge.log.info("[clash-and-cleave] " .. msg) end
+local function warn_feature(msg) shroudforge.log.warn("[clash-and-cleave] " .. msg) end
 
 if not loader.features.patch then
     log("no patch access in this phase, nothing to do")
@@ -27,12 +32,12 @@ local SWING_CANCEL = feature("swingCancel")
 local ARMOUR_DEFENCE = feature("armourDefence")
 local ARMOUR_MULTIPLIER = tonumber(shroudforge.settings.get("armourDefenceMultiplier", 1.25)) or 1.25
 local POISE = feature("poise")
-local DODGE_BY_ARMOUR = feature("dodgeByArmour")
 
 local function number_setting(key, fallback) return tonumber(shroudforge.settings.get(key, fallback)) or fallback end
 
-log(string.format("features: swing cancel %s, armour defence %s (x%.2f), poise %s, dodge cost by armour %s", SWING_CANCEL and "on" or "off",
-    ARMOUR_DEFENCE and "on" or "off", ARMOUR_MULTIPLIER, POISE and "on" or "off", DODGE_BY_ARMOUR and "on" or "off"))
+log(string.format("%s, features: swing cancel %s, armour defence %s (x%.2f), poise %s",
+    loader.is_server and "dedicated server" or "client", SWING_CANCEL and "on" or "off",
+    ARMOUR_DEFENCE and "on" or "off", ARMOUR_MULTIPLIER, POISE and "on" or "off"))
 
 local MS = 1000000 -- sequence times are nanoseconds
 local SWING_LEAD_MS = 150
@@ -177,7 +182,7 @@ local function patch_swing_cancel()
     log(string.format("swing cancel: %d attacks changed, %d without a lock to move, %d ms of lock removed in total",
         changed, skipped, freed // MS))
     if example then log("  example " .. example) end
-    if changed == 0 then error("clash-and-cleave: swing cancel found no attacks, the game data changed") end
+    if changed == 0 then warn_feature("swing cancel found no attacks here: nothing changed") end
 end
 
 local DEFENCE_FIELDS = { "physical", "blunt", "pierce", "cut", "magical", "fire", "ice", "fog", "lightning" }
@@ -209,7 +214,7 @@ local function patch_armour_defence(multiplier)
     end
     log(string.format("armour defence: %d pieces x%.2f, %d without armour values", changed, multiplier, skipped))
     if example then log("  example before " .. example) end
-    if changed == 0 then error("clash-and-cleave: armour defence found no armour, the game data changed") end
+    if changed == 0 then warn_feature("armour defence found no armour here: nothing changed") end
 end
 
 -- Light, medium or heavy for an armour item's debug name.
@@ -229,12 +234,10 @@ local function export_poise()
         light = number_setting("poiseLightArmour", 3), shield = number_setting("poiseShield", 30) }
     local counts = { heavy = 0, medium = 0, light = 0, shield = 0, two_handed = 0 }
     points.two_handed = -1 -- marks the weapon for the DLL: a shield gives no poise with it
-    local dodge = { heavy = number_setting("dodgeHeavyPiece", 7), medium = number_setting("dodgeMediumPiece", 3),
-        light = number_setting("dodgeLightPiece", 2), shield = 0, two_handed = 0 }
-    local lines = { string.format("poise %d light=%d medium=%d heavy=%d refill=%d dodge %d minimum=%d", POISE and 1 or 0,
+    local lines = { string.format("poise %d light=%d medium=%d heavy=%d refill=%d", POISE and 1 or 0,
         number_setting("poiseLightHit", 5), number_setting("poiseMediumHit", 10), number_setting("poiseHeavyHit", 50),
-        math.floor(number_setting("poiseRefillSeconds", 3) * 1000), DODGE_BY_ARMOUR and 1 or 0, number_setting("dodgeMinimum", 5)) }
-    if POISE or DODGE_BY_ARMOUR then
+        math.floor(number_setting("poiseRefillSeconds", 3) * 1000)) }
+    if POISE then
         for _, registry in ipairs(game.assets.get_resources_by_type("keen::ItemRegistryResource")) do
             local data = registry.data
             for i, name in ipairs(data.dbgNames) do
@@ -248,13 +251,16 @@ local function export_poise()
                     -- From the text form: nothing here edits the item.
                     local text = tostring(game.assets.get_resource(data.itemRefs[i], "keen::ItemInfo").data)
                     local id = text:match('^{"itemId":{"value":(%d+)}')
-                    if not id then error("clash-and-cleave: no item id for " .. name) end
-                    lines[#lines + 1] = id .. " " .. math.floor(points[kind]) .. " " .. math.floor(dodge[kind])
-                    counts[kind] = counts[kind] + 1
+                    if id then
+                        lines[#lines + 1] = id .. " " .. math.floor(points[kind])
+                        counts[kind] = counts[kind] + 1
+                    else
+                        warn_feature("poise: no item id for " .. name)
+                    end
                 end
             end
         end
-        if counts.heavy == 0 or counts.shield == 0 then error("clash-and-cleave: poise found no armour, the game data changed") end
+        if counts.heavy == 0 or counts.shield == 0 then warn_feature("poise found no armour or no shields here") end
     end
     io.export("clash-and-cleave/poise.txt", table.concat(lines, "\n") .. "\n")
     log(string.format("poise: %d heavy, %d medium, %d light pieces, %d shields, %d two-handed weapons exported", counts.heavy,
