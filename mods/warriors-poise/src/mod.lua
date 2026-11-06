@@ -12,7 +12,8 @@
 --     for the native DLL, which spends and refills the pool. The game has no armour class, only
 --     item names: Warrior is heavy, Ranger medium, Mage light. See poise_class.
 --
--- Runs after Forged & Found (optional dependency), so its armour variants are covered too.
+-- Depends on no other mod. ShroudForge loads mods in id order, so with Forged & Found installed this
+-- runs after it and covers its armour variants too.
 --
 -- A feature that finds nothing to change only warns: error() fails the whole asset pass, the game
 -- then starts on vanilla data, and vanilla data deletes Forged & Found's variant items. error() is
