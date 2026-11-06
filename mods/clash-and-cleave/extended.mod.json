@@ -40,6 +40,143 @@
       "applyAt": "restart",
       "restartRequired": true,
       "assetPreparation": true
+    },
+    "poise": {
+      "value": false,
+      "label": "Poise",
+      "description": "Your armour and shield absorb hits. Light, Medium and Heavy hits drain your poise and only make you twitch until it runs out. Poise refills when you have not been hit for a moment. Boss hits, stuns and knockdowns always land.",
+      "control": "toggle",
+      "applyAt": "restart",
+      "restartRequired": true,
+      "assetPreparation": true
+    },
+    "poiseHeavyArmour": {
+      "value": 10,
+      "label": "Heavy armour piece",
+      "description": "Poise from each heavy piece (Warrior armour).",
+      "control": "slider",
+      "min": 0,
+      "max": 30,
+      "step": 1,
+      "enabledWhen": {
+        "setting": "poise",
+        "equals": true
+      },
+      "applyAt": "restart",
+      "restartRequired": true,
+      "assetPreparation": true
+    },
+    "poiseMediumArmour": {
+      "value": 6,
+      "label": "Medium armour piece",
+      "description": "Poise from each medium piece (Ranger armour, mixed sets).",
+      "control": "slider",
+      "min": 0,
+      "max": 30,
+      "step": 1,
+      "enabledWhen": {
+        "setting": "poise",
+        "equals": true
+      },
+      "applyAt": "restart",
+      "restartRequired": true,
+      "assetPreparation": true
+    },
+    "poiseLightArmour": {
+      "value": 3,
+      "label": "Light armour piece",
+      "description": "Poise from each light piece (Mage armour, cloth).",
+      "control": "slider",
+      "min": 0,
+      "max": 30,
+      "step": 1,
+      "enabledWhen": {
+        "setting": "poise",
+        "equals": true
+      },
+      "applyAt": "restart",
+      "restartRequired": true,
+      "assetPreparation": true
+    },
+    "poiseShield": {
+      "value": 30,
+      "label": "Shield",
+      "description": "Poise from an equipped shield, raised or not.",
+      "control": "slider",
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "enabledWhen": {
+        "setting": "poise",
+        "equals": true
+      },
+      "applyAt": "restart",
+      "restartRequired": true,
+      "assetPreparation": true
+    },
+    "poiseLightHit": {
+      "value": 5,
+      "label": "Light hit cost",
+      "description": "Poise a Light hit removes.",
+      "control": "slider",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "enabledWhen": {
+        "setting": "poise",
+        "equals": true
+      },
+      "applyAt": "restart",
+      "restartRequired": true,
+      "assetPreparation": true
+    },
+    "poiseMediumHit": {
+      "value": 10,
+      "label": "Medium hit cost",
+      "description": "Poise a Medium hit removes.",
+      "control": "slider",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "enabledWhen": {
+        "setting": "poise",
+        "equals": true
+      },
+      "applyAt": "restart",
+      "restartRequired": true,
+      "assetPreparation": true
+    },
+    "poiseHeavyHit": {
+      "value": 50,
+      "label": "Heavy hit cost",
+      "description": "Poise a Heavy hit removes.",
+      "control": "slider",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "enabledWhen": {
+        "setting": "poise",
+        "equals": true
+      },
+      "applyAt": "restart",
+      "restartRequired": true,
+      "assetPreparation": true
+    },
+    "poiseRefillSeconds": {
+      "value": 3,
+      "label": "Refill delay",
+      "description": "Seconds without a poise hit before poise is full again.",
+      "control": "slider",
+      "min": 1,
+      "max": 10,
+      "step": 0.5,
+      "enabledWhen": {
+        "setting": "poise",
+        "equals": true
+      },
+      "applyAt": "restart",
+      "restartRequired": true,
+      "assetPreparation": true
     }
   }
 }

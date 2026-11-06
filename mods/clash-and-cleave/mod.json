@@ -1,11 +1,11 @@
 {
   "id": "clash-and-cleave",
   "name": "Clash & Cleave (prototype)",
-  "version": "0.1.0",
-  "description": "PROTOTYPE, client side only. A melee combat rework: cancel a swing during its wind-up, and stronger armour. Each feature is a switch, all off by default.",
+  "version": "0.2.0",
+  "description": "PROTOTYPE, client side only. A melee combat rework: cancel a swing during its wind-up, stronger armour, and poise from your armour and shield. Each feature is a switch, all off by default.",
   "authors": ["Crius"],
   "dependencies": [
     { "id": "forged-and-found", "version": ">=0.14.0", "optional": true }
   ],
-  "capabilities": ["patch"]
+  "capabilities": ["patch", "export"]
 }

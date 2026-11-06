@@ -1,4 +1,4 @@
--- Clash & Cleave 0.1.0 prototype (client side only for now).
+-- Clash & Cleave 0.2.0 prototype (client side only for now).
 --
 --   * Swing cancel: vanilla locks block and dodge from the wind-up through the recovery. Here the
 --     lock covers only the swing itself: from SWING_LEAD_MS before the first hit to RECOVERY_MS
@@ -8,6 +8,9 @@
 --     removes the locks entirely.
 --   * Armour defence: multiplies every armour piece's armorSetup.distribution. The classes keep
 --     their vanilla split (Warrior physical, Mage magical, Ranger even).
+--   * Poise: gives every armour piece and shield poise points and exports them with the rules
+--     for the native DLL, which spends and refills the pool. The game has no armour class, only
+--     item names: Warrior is heavy, Ranger medium, Mage light. See poise_class.
 --
 -- Runs after Forged & Found (optional dependency), so its armour variants are covered too.
 
@@ -23,13 +26,16 @@ local function feature(key) return shroudforge.settings.get(key, false) == true 
 local SWING_CANCEL = feature("swingCancel")
 local ARMOUR_DEFENCE = feature("armourDefence")
 local ARMOUR_MULTIPLIER = tonumber(shroudforge.settings.get("armourDefenceMultiplier", 1.25)) or 1.25
+local POISE = feature("poise")
 
-log(string.format("features: swing cancel %s, armour defence %s (x%.2f)", SWING_CANCEL and "on" or "off",
-    ARMOUR_DEFENCE and "on" or "off", ARMOUR_MULTIPLIER))
+local function number_setting(key, fallback) return tonumber(shroudforge.settings.get(key, fallback)) or fallback end
+
+log(string.format("features: swing cancel %s, armour defence %s (x%.2f), poise %s", SWING_CANCEL and "on" or "off",
+    ARMOUR_DEFENCE and "on" or "off", ARMOUR_MULTIPLIER, POISE and "on" or "off"))
 
 local MS = 1000000 -- sequence times are nanoseconds
-local SWING_LEAD_MS = 250
-local RECOVERY_MS = 150
+local SWING_LEAD_MS = 150
+local RECOVERY_MS = 100
 
 local LOCK_FLAGS = { CanBlock = true, CanEvade = true }
 local DISABLE_EVENT = "keen::actor::DisableAbilityEvent"
@@ -205,6 +211,54 @@ local function patch_armour_defence(multiplier)
     if changed == 0 then error("clash-and-cleave: armour defence found no armour, the game data changed") end
 end
 
+-- Light, medium or heavy for an armour item's debug name.
+local function poise_class(name)
+    local class = name:match("Armor_T[%d%-TX]*_(%a+)_")
+    if class == "Warrior" then return "heavy" end
+    if class == "Mage" or class == "Fur" or class == "Rags" or class == "Starter" then return "light" end
+    return "medium" -- Ranger, and the mixed sets (MultiClass, Unique) and anything else
+end
+
+local function export_poise()
+    if not loader.features.export then
+        log("poise: export not available, the DLL stays off")
+        return
+    end
+    local points = { heavy = number_setting("poiseHeavyArmour", 10), medium = number_setting("poiseMediumArmour", 6),
+        light = number_setting("poiseLightArmour", 3), shield = number_setting("poiseShield", 30) }
+    local counts = { heavy = 0, medium = 0, light = 0, shield = 0, two_handed = 0 }
+    points.two_handed = -1 -- marks the weapon for the DLL: a shield gives no poise with it
+    local lines = { string.format("poise %d light=%d medium=%d heavy=%d refill=%d", POISE and 1 or 0,
+        number_setting("poiseLightHit", 5), number_setting("poiseMediumHit", 10), number_setting("poiseHeavyHit", 50),
+        math.floor(number_setting("poiseRefillSeconds", 3) * 1000)) }
+    if POISE then
+        for _, registry in ipairs(game.assets.get_resources_by_type("keen::ItemRegistryResource")) do
+            local data = registry.data
+            for i, name in ipairs(data.dbgNames) do
+                local kind
+                if name:find("^Armor_") or name:find("^Craft_Armor_") then kind = poise_class(name)
+                elseif name:find("^Shield_") or name:find("^Craft_Shield_") then kind = "shield"
+                elseif (name:find("^Weapon_") or name:find("^Craft_Weapon_")) and name:find("_2H_", 1, true) then
+                    kind = "two_handed"
+                end
+                if kind then
+                    -- From the text form: nothing here edits the item.
+                    local text = tostring(game.assets.get_resource(data.itemRefs[i], "keen::ItemInfo").data)
+                    local id = text:match('^{"itemId":{"value":(%d+)}')
+                    if not id then error("clash-and-cleave: no item id for " .. name) end
+                    lines[#lines + 1] = id .. " " .. math.floor(points[kind])
+                    counts[kind] = counts[kind] + 1
+                end
+            end
+        end
+        if counts.heavy == 0 or counts.shield == 0 then error("clash-and-cleave: poise found no armour, the game data changed") end
+    end
+    io.export("clash-and-cleave/poise.txt", table.concat(lines, "\n") .. "\n")
+    log(string.format("poise: %d heavy, %d medium, %d light pieces, %d shields, %d two-handed weapons exported", counts.heavy,
+        counts.medium, counts.light, counts.shield, counts.two_handed))
+end
+
 if SWING_CANCEL then patch_swing_cancel() end
 if ARMOUR_DEFENCE then patch_armour_defence(math.max(0, ARMOUR_MULTIPLIER)) end
+export_poise()
 log("done")
