@@ -15,7 +15,9 @@ permissions:
 
 jobs:
   package:
-    runs-on: windows-latest
+    # A fixed image, not windows-latest: native/build.ps1 needs its Visual Studio 2022 17.14 and
+    # MSVC 14.44.35207 (the build fails with a clear error if an image update removes them).
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
 
