@@ -7,15 +7,19 @@ $ErrorActionPreference = 'Stop'
 # Pinned compiler: the same source built by another MSVC version gives a different DLL, and only a
 # DLL someone has run in game should ship. GitHub's runner and every local build use exactly this
 # toolset; a machine without it gets an error, never a silent build with another compiler.
-$VsVersions = '[17.14,18.0)'  # Visual Studio 2022 17.14 (any edition, Build Tools included)
+# Any Visual Studio installation may provide it: Visual Studio 2022 17.14 as its own toolset, or a
+# newer Visual Studio with the side-by-side component "MSVC v143 - VS 2022 C++ x64/x86 build tools
+# (v14.44-17.14)".
 $Toolset = '14.44.35207'
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 if (-not (Test-Path $vswhere)) { throw 'Visual Studio Installer not found: install Visual Studio 2022 Build Tools 17.14 (see README, Building from source)' }
-$vs = & $vswhere -products * -version $VsVersions -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -latest -property installationPath
-if (-not $vs) { throw "Visual Studio 2022 17.14 with the C++ x64/x86 build tools not found (see README, Building from source)" }
-if (-not (Test-Path (Join-Path $vs "VC\Tools\MSVC\$Toolset"))) {
-    throw "MSVC toolset $Toolset not found in $vs. In the Visual Studio Installer, add the individual component " +
+$installs = @(& $vswhere -products * -sort -property installationPath)
+$vs = $installs | Where-Object { Test-Path (Join-Path $_ "VC\Tools\MSVC\$Toolset\bin\Hostx64\x64\cl.exe") } | Select-Object -First 1
+if (-not $vs) {
+    $found = foreach ($i in $installs) { Get-ChildItem (Join-Path $i 'VC\Tools\MSVC') -Directory -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name) in $i" } }
+    throw "MSVC toolset $Toolset not found in any Visual Studio installation (found: $(if ($found) { $found -join '; ' } else { 'none' })). " +
+          "Install Visual Studio 2022 17.14 Build Tools, or add the individual component " +
           "'MSVC v143 - VS 2022 C++ x64/x86 build tools (v14.44-17.14)' (see README, Building from source)"
 }
 $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'

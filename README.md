@@ -107,13 +107,12 @@ characters or worlds, so there is nothing to convert or clean up.
 
 ## Building from source
 
-Needs Windows, PowerShell 7 and **Visual Studio 2022 version 17.14** (the free Build Tools are
-enough) with the **MSVC 14.44.35207** compiler:
+Needs Windows, PowerShell 7 and the **MSVC 14.44.35207** compiler, from either:
 
-1. Install [Build Tools for Visual Studio 2022](https://visualstudio.microsoft.com/downloads/) with the
-   "Desktop development with C++" workload.
-2. If your Visual Studio 2022 is newer than 17.14, add the individual component
-   "MSVC v143 - VS 2022 C++ x64/x86 build tools (v14.44-17.14)" in the Visual Studio Installer.
+- **Visual Studio 2022 version 17.14** (the free Build Tools are enough) with the "Desktop
+  development with C++" workload, or
+- a newer Visual Studio (2026 included) with the individual component
+  "MSVC v143 - VS 2022 C++ x64/x86 build tools (v14.44-17.14)", added in the Visual Studio Installer.
 
 The compiler is pinned on purpose: another MSVC version builds a different DLL from the same source,
 and only a DLL that was tested in game should be released. With the pinned compiler, a local build
