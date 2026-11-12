@@ -1,4 +1,4 @@
--- Warriors' Poise 0.6.0 beta (client and dedicated server, install it on both).
+-- Warriors' Poise 0.6.1 (client and dedicated server, install it on both).
 --
 --   * Swing cancel: vanilla locks block and dodge from the wind-up through the recovery. Here the
 --     lock covers only the swing itself: from SWING_LEAD_MS before the first hit to RECOVERY_MS

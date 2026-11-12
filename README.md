@@ -4,7 +4,7 @@ An Enshrouded mod for [ShroudForge](https://github.com/bonsaibauer/shroudforge) 
 melee fights about standing your ground. It has three features. Each one is a separate switch
 in the mod's ShroudForge settings, and all start **off**.
 
-> **Beta.** Fully tested on game version 1287369 (the Steam update of 2026-11-04) with
+> Fully tested on game version 1287369 (the Steam update of 2026-11-04) with
 > ShroudForge 1.7.9, in local worlds and with one player on a dedicated server. Not tested yet:
 > several players at once, friends joining a game hosted from the client, and Medium hits, which
 > no test has run into.
