@@ -1,20 +1,26 @@
-// warriors-poise-native 0.5.0: armour-based poise. Every worn armour piece and shield adds
+// warriors-poise-native 0.6.0: armour-based poise. Every worn armour piece and shield adds
 // points to a pool, every Light, Medium or Heavy hit removes some. While points remain the hit
 // only makes the character twitch; when they run out it lands as usual. The pool refills after
 // a few seconds without a poise hit. The data mod assigns the points per item and exports them
 // with the rules to <game>/shroudforge/exports/warriors-poise/poise.txt.
 //
 // Where: the code that fills a keen::ecs::HitEvent, at the store of its hitReaction. That spot is
-// inside a function fragment with no entry of its own, so it is patched in place. The byte
-// pattern comes from Combat Rebalanced by TakeyaSaito (MIT), which patches the same store.
+// inside a function fragment with no entry of its own, so it is patched in place. The idea of
+// patching that store comes from Combat Rebalanced by TakeyaSaito (MIT).
 // Registers there: r13 = source event, r12w = hit type, rbp = frame holding the target entity.
-// The dedicated server has the same code (game 1287369: client +0x3F065F, server +0x1918FF, all 664
-// instructions of the fragment equal), so one DLL serves both. Equipment exists only where a
+// The dedicated server has the same code, so one DLL serves both. Equipment exists only where a
 // character is simulated: the server, or the client when it hosts a local world.
 //
-// Worn items: the entity's keen::ecs::Equipment component lists them. Entity layout as in the
-// game's own getter (game 1287369: client +0x9BF460, server +0x65B2F0) and ShroudForge's ecsReadLayout. The component's
-// index differs per build, so it is found by its size instead.
+// Nothing is tied to one game build:
+//   - code: every place is found by rule (autodetect.h): the hit site, the game's component
+//     getter (whose instructions give the entity layout) and the frame slot of the target entity;
+//   - data: Equipment, ItemImpact and HitEvent offsets, the hit-type values and the slot of the
+//     main hand and the shield come from ShroudForge's type dump of the running executable
+//     (typedump.h), used only when its SHA-256 identity matches. Without one, built-in values are
+//     used only on the executables they were tested on.
+// Anything missing, ambiguous or unexpected leaves the game untouched (vanilla hits) and the log
+// says why. At run time every read of game memory is guarded; repeated faults switch poise off
+// for the session, and a hit whose target does not check out is left alone.
 //
 // Log: <game>/shroudforge/logs/warriors-poise-native.log, one session. Nothing is written into the mod folder.
 #include <windows.h>
@@ -22,46 +28,42 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <unordered_map>
+#include <vector>
+
+#include "autodetect.h"
+#include "typedump.h"
 
 namespace {
 
-constexpr char kVersion[] = "0.5.0";
+constexpr char kVersion[] = "0.6.0";
 
-// mov [rbx+0BCh],esi / mov [rbx+0E0h],r12w / mov eax,[r13+0B8h]
-const unsigned char kHitSite[] = {0x89, 0xB3, 0xBC, 0x00, 0x00, 0x00, 0x66, 0x44, 0x89, 0xA3, 0xE0,
-                                  0x00, 0x00, 0x00, 0x41, 0x8B, 0x85, 0xB8, 0x00, 0x00, 0x00};
-// The first two instructions: exactly the size of the absolute jump written over them.
+// The first two instructions of the hit site (mov [rbx+X],esi / mov [rbx+R],r12w): exactly the
+// size of the absolute jump written over them. The pattern fixes their encoding, so their length.
 constexpr size_t kPatchSize = 14;
 
-// keen::ecs::HitEvent
-constexpr size_t kEventRootTarget = 0xA0;
-// Target entity pointer in the hit code's frame (rbp-relative).
-constexpr size_t kFrameTargetEntity = 0xC8;
-// Entity record.
-constexpr size_t kEntityId = 0x10, kEntityLayout = 0x18, kEntityStorage = 0x20, kEntityRow = 0x30;
-// Entity layout: presence bits at +0, then per-component u16 offsets and strides.
-constexpr size_t kLayoutOffsets = 0x84, kLayoutStrides = 0xA84;
-constexpr uint32_t kMaxComponents = 1024;
-// keen::ecs::Equipment: an array of ItemImpact, each starting with an ItemInstanceInfo.
-constexpr uint32_t kEquipmentSize = 1380;
-constexpr size_t kImpactsAt = 8, kImpactSize = 72, kItemIdAt = 8;
-constexpr int kImpactSlots = 11;
-// Slots seen in game: 0 weapon, 1 shield, 2-6 armour, 7-8 rings, 9 ammo.
-constexpr int kWeaponSlot = 0, kShieldSlot = 1;
+// Entity record: the id is not read by the getter, so it stays a constant (ShroudForge's
+// ecsReadLayout.entityId, the same in all its 13 profiles of 2026). Each hit checks it against
+// the event's target, so a wrong value means "left alone", never a wrong pool.
+constexpr size_t kEntityId = 0x10;
+constexpr uint32_t kMaxComponentBits = 1024;
 
-// keen::impact::HitReactionType
-constexpr uint64_t kVeryLight = 1, kLight = 2, kMedium = 3, kHeavy = 4;
 // One blow can reach a target as several events within a tick or two.
 constexpr uint64_t kSameBlowMs = 50;
 constexpr int kMaxPlayers = 16;
-constexpr LONG kMaxPoiseLines = 400, kMaxSkipLines = 20;
-
-const char* const kReactions[] = {"None", "VeryLight", "Light", "Medium", "Heavy", "Boss", "LongStun",
-                                  "TrapStun", "ShortStun_BeGoneSkill", "ThrowIntoAir", "ThrowIntoAir_OnlyWhenGrounded"};
+constexpr LONG kMaxPoiseLines = 400, kMaxSkipLines = 20, kMaxOddLines = 10;
+// Memory faults while reading a target before poise switches itself off for the session.
+constexpr LONG kMaxFaults = 10;
 
 HANDLE g_log = INVALID_HANDLE_VALUE;
-volatile LONG g_poise_lines = 0, g_skip_lines = 0, g_faults = 0;
+volatile LONG g_poise_lines = 0, g_skip_lines = 0, g_odd_lines = 0, g_faults = 0;
+volatile LONG g_off = 0;  // set once poise gives up for this session
+
+// Where things are in this build (filled once before the hook is installed, read-only after).
+typedump::Layout g_layout;
+autodetect::Found g_code;
+uint32_t g_max_components = 0;
 
 struct Rules {
     bool enabled = false;
@@ -81,6 +83,7 @@ struct Pool {
 };
 Pool g_pools[kMaxPlayers];
 SRWLOCK g_pools_lock = SRWLOCK_INIT;
+SRWLOCK g_log_lock = SRWLOCK_INIT;
 
 void log_line(const char* text) {
     if (g_log == INVALID_HANDLE_VALUE) return;
@@ -91,46 +94,59 @@ void log_line(const char* text) {
                      t.wMinute, t.wSecond, t.wMilliseconds, text);
     if (n <= 0) return;
     DWORD written;
+    AcquireSRWLockExclusive(&g_log_lock);
     WriteFile(g_log, line, static_cast<DWORD>(n < static_cast<int>(sizeof line) ? n : sizeof line - 1), &written, nullptr);
+    ReleaseSRWLockExclusive(&g_log_lock);
 }
+
+const char* reaction_name(uint64_t reaction) {
+    if (reaction < g_layout.reactions.size() && !g_layout.reactions[reaction].empty()) return g_layout.reactions[reaction].c_str();
+    return "unknown";
+}
+
+constexpr int kMaxSlots = 32;
 
 struct Hit {
     uint32_t root_target = 0;
     bool has_equipment = false;
     const char* skipped = nullptr;  // why there is no equipment to read
-    uint32_t items[kImpactSlots] = {};
+    uint32_t items[kMaxSlots] = {};
 };
 
 // Reads the game's memory; a bad guess must end in a log line, never in a crash.
 bool read_hit(const uint8_t* event, const uint8_t* frame, Hit& hit) {
+    const typedump::Layout& l = g_layout;
+    const autodetect::Found& c = g_code;
     __try {
-        hit.root_target = *reinterpret_cast<const uint32_t*>(event + kEventRootTarget);
-        const uint8_t* entity = *reinterpret_cast<const uint8_t* const*>(frame + kFrameTargetEntity);
+        hit.root_target = *reinterpret_cast<const uint32_t*>(event + l.event_root_target);
+        const uint8_t* entity = *reinterpret_cast<const uint8_t* const*>(frame + c.frame_target);
         hit.skipped = "no target entity";
         if (!entity) return true;
         hit.skipped = "another entity in the frame";
         if (*reinterpret_cast<const uint32_t*>(entity + kEntityId) != hit.root_target) return true;
-        const uint8_t* layout = *reinterpret_cast<const uint8_t* const*>(entity + kEntityLayout);
-        const uint8_t* storage = *reinterpret_cast<const uint8_t* const*>(entity + kEntityStorage);
-        uint32_t row = *reinterpret_cast<const uint32_t*>(entity + kEntityRow);
+        const uint8_t* layout = *reinterpret_cast<const uint8_t* const*>(entity + c.entity_layout);
+        const uint8_t* storage = *reinterpret_cast<const uint8_t* const*>(entity + c.entity_storage);
+        uint32_t row = *reinterpret_cast<const uint32_t*>(entity + c.entity_row);
         hit.skipped = "no layout";
         if (!layout || !storage) return true;
 
-        int found = -1;
-        for (uint32_t i = 0; i < kMaxComponents; ++i) {
+        int found = -1, candidates = 0;
+        for (uint32_t i = 0; i < g_max_components; ++i) {
             uint64_t bits = *reinterpret_cast<const uint64_t*>(layout + (i >> 6) * 8);
             if (!((bits >> (i & 63)) & 1)) continue;
-            uint16_t stride = *reinterpret_cast<const uint16_t*>(layout + kLayoutStrides + i * 2);
-            if (stride != kEquipmentSize) continue;
-            found = static_cast<int>(i);
-            break;
+            uint16_t stride = *reinterpret_cast<const uint16_t*>(layout + c.layout_strides + i * 2);
+            if (stride != l.equipment_size) continue;
+            if (found < 0) found = static_cast<int>(i);
+            ++candidates;
         }
         hit.skipped = "no Equipment on the target";
         if (found < 0) return true;
-        uint16_t offset = *reinterpret_cast<const uint16_t*>(layout + kLayoutOffsets + found * 2);
-        const uint8_t* equipment = storage + offset + static_cast<size_t>(row) * kEquipmentSize;
-        for (int slot = 0; slot < kImpactSlots; ++slot) {
-            hit.items[slot] = *reinterpret_cast<const uint32_t*>(equipment + kImpactsAt + slot * kImpactSize + kItemIdAt);
+        hit.skipped = "more than one component of Equipment's size (ambiguous)";
+        if (candidates != 1) return true;
+        uint16_t offset = *reinterpret_cast<const uint16_t*>(layout + c.layout_offsets + found * 2);
+        const uint8_t* equipment = storage + offset + static_cast<size_t>(row) * l.equipment_size;
+        for (uint32_t slot = 0; slot < l.impact_slots; ++slot) {
+            hit.items[slot] = *reinterpret_cast<const uint32_t*>(equipment + l.impacts_at + slot * l.impact_size + l.item_id_at);
         }
         hit.has_equipment = true;
         return true;
@@ -140,9 +156,9 @@ bool read_hit(const uint8_t* event, const uint8_t* frame, Hit& hit) {
 }
 
 int cost_of(uint64_t reaction) {
-    if (reaction == kLight) return g_rules.light;
-    if (reaction == kMedium) return g_rules.medium;
-    if (reaction == kHeavy) return g_rules.heavy;
+    if (reaction == g_layout.light) return g_rules.light;
+    if (reaction == g_layout.medium) return g_rules.medium;
+    if (reaction == g_layout.heavy) return g_rules.heavy;
     return -1;  // nothing to absorb, or a hit poise never stops (Boss, stuns, knockdowns)
 }
 
@@ -160,30 +176,46 @@ Pool* pool_of(uint32_t target) {
 
 // Called by the stub for every hit. Returns the hit type to store.
 uint64_t on_hit(const uint8_t* event, const uint8_t* frame, uint64_t reaction) {
+    if (g_off) return reaction;
+    if (reaction >= g_layout.reactions.size()) {
+        // Not a value of HitReactionType: the code around the site is not what it was. Leave it alone.
+        if (InterlockedIncrement(&g_odd_lines) <= kMaxOddLines) {
+            char text[96];
+            snprintf(text, sizeof text, "hit type %llu is not a known HitReactionType: left alone", static_cast<unsigned long long>(reaction));
+            log_line(text);
+        }
+        return reaction;
+    }
     int cost = cost_of(reaction);
     if (!g_rules.enabled || cost < 0) return reaction;
     Hit hit;
     if (!read_hit(event, frame, hit)) {
-        if (InterlockedIncrement(&g_faults) <= 5) log_line("hit: memory fault while reading the target");
+        LONG faults = InterlockedIncrement(&g_faults);
+        if (faults <= 5) log_line("hit: memory fault while reading the target, left alone");
+        if (faults == kMaxFaults) {
+            InterlockedExchange(&g_off, 1);
+            log_line("poise OFF for this session: repeated memory faults (game changed?); hits stay vanilla");
+        }
         return reaction;
     }
     if (!hit.has_equipment) {
         // On a client connected to a server this answers whether the hit code runs here at all.
         if (InterlockedIncrement(&g_skip_lines) <= kMaxSkipLines) {
-            char text[160];
-            snprintf(text, sizeof text, "%s hit, target %u: left alone, %s", kReactions[reaction], hit.root_target, hit.skipped);
+            char text[200];
+            snprintf(text, sizeof text, "%s hit, target %u: left alone, %s", reaction_name(reaction), hit.root_target, hit.skipped);
             log_line(text);
         }
         return reaction;
     }
 
-    auto weapon = g_points.find(hit.items[kWeaponSlot]);
+    const typedump::Layout& l = g_layout;
+    auto weapon = g_points.find(hit.items[l.weapon_slot]);
     bool two_handed = weapon != g_points.end() && weapon->second < 0;
     int full = 0;
-    for (int slot = 0; slot < kImpactSlots; ++slot) {
+    for (uint32_t slot = 0; slot < l.impact_slots; ++slot) {
         auto found = g_points.find(hit.items[slot]);
         if (found == g_points.end() || found->second <= 0) continue;
-        if (slot == kShieldSlot && two_handed) continue;  // most two-handed weapons already empty this slot
+        if (slot == l.shield_slot && two_handed) continue;  // most two-handed weapons already empty this slot
         full += found->second;
     }
     if (full <= 0) return reaction;  // creatures, and players with nothing that gives poise
@@ -209,12 +241,12 @@ uint64_t on_hit(const uint8_t* event, const uint8_t* frame, uint64_t reaction) {
 
     if (!repeat && InterlockedIncrement(&g_poise_lines) <= kMaxPoiseLines) {
         char text[200];
-        snprintf(text, sizeof text, "%s hit, target %u: poise %d -> %d of %d, %s (weapon %u%s, shield %u)", kReactions[reaction],
-                 hit.root_target, before, after, full, absorbed ? "absorbed" : "flinch", hit.items[kWeaponSlot],
-                 two_handed ? " two-handed" : "", hit.items[kShieldSlot]);
+        snprintf(text, sizeof text, "%s hit, target %u: poise %d -> %d of %d, %s (weapon %u%s, shield %u)", reaction_name(reaction),
+                 hit.root_target, before, after, full, absorbed ? "absorbed" : "flinch", hit.items[l.weapon_slot],
+                 two_handed ? " two-handed" : "", hit.items[l.shield_slot]);
         log_line(text);
     }
-    return absorbed ? kVeryLight : reaction;
+    return absorbed ? l.very_light : reaction;
 }
 
 // Saves what the game code may still need, calls on_hit(r13, rbp, r12w), stores the result in
@@ -255,30 +287,6 @@ const unsigned char kStubExit[] = {
 };
 const unsigned char kAbsoluteJump[] = {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};  // jmp [rip+0], then the address
 
-// The only place in the code section holding the pattern, or nullptr.
-unsigned char* find_hit_site(unsigned char* base) {
-    auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-    auto nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
-    IMAGE_SECTION_HEADER* section = IMAGE_FIRST_SECTION(nt);
-    unsigned char* found = nullptr;
-    int matches = 0;
-    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
-        if (!(section[i].Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
-        unsigned char* p = base + section[i].VirtualAddress;
-        size_t size = section[i].Misc.VirtualSize;
-        for (size_t at = 0; at + sizeof kHitSite <= size; ++at) {
-            if (p[at] == kHitSite[0] && memcmp(p + at, kHitSite, sizeof kHitSite) == 0) {
-                found = p + at;
-                ++matches;
-            }
-        }
-    }
-    char text[96];
-    snprintf(text, sizeof text, "hit site pattern: %d match(es), expected 1", matches);
-    log_line(text);
-    return matches == 1 ? found : nullptr;
-}
-
 bool install(unsigned char* site) {
     constexpr size_t kStubSize = sizeof kStubEntry + 8 + sizeof kStubExit + kPatchSize + sizeof kAbsoluteJump + 8;
     auto stub = static_cast<unsigned char*>(VirtualAlloc(nullptr, kStubSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
@@ -293,13 +301,16 @@ bool install(unsigned char* site) {
     put(kStubEntry, sizeof kStubEntry);
     put(&callback, 8);
     put(kStubExit, sizeof kStubExit);
-    put(site, kPatchSize);
+    put(site, kPatchSize);  // the two moved stores have no rip-relative operand
     put(kAbsoluteJump, sizeof kAbsoluteJump);
     put(&back, 8);
     FlushInstructionCache(GetCurrentProcess(), stub, kStubSize);
 
     DWORD old;
-    if (!VirtualProtect(site, kPatchSize, PAGE_EXECUTE_READWRITE, &old)) return false;
+    if (!VirtualProtect(site, kPatchSize, PAGE_EXECUTE_READWRITE, &old)) {
+        VirtualFree(stub, 0, MEM_RELEASE);
+        return false;
+    }
     uint64_t target = reinterpret_cast<uint64_t>(stub);
     memcpy(site, kAbsoluteJump, sizeof kAbsoluteJump);
     memcpy(site + sizeof kAbsoluteJump, &target, 8);
@@ -308,29 +319,28 @@ bool install(unsigned char* site) {
     return true;
 }
 
-void open_log() {
+// <game folder>\<relative>, or false.
+bool game_path(const wchar_t* relative, wchar_t* out) {
     wchar_t path[MAX_PATH];
     DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
-    if (!n || n >= MAX_PATH) return;
+    if (!n || n >= MAX_PATH) return false;
     wchar_t* slash = wcsrchr(path, L'\\');
-    if (!slash) return;
+    if (!slash) return false;
     *slash = 0;
+    return swprintf(out, MAX_PATH, L"%s\\%s", path, relative) > 0;
+}
+
+void open_log() {
     wchar_t file[MAX_PATH];
-    if (swprintf(file, MAX_PATH, L"%s\\shroudforge\\logs\\warriors-poise-native.log", path) <= 0) return;
+    if (!game_path(L"shroudforge\\logs\\warriors-poise-native.log", file)) return;
     DeleteFileW(file);  // one session only, so the log cannot grow without end
     g_log = CreateFileW(file, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 }
 
 // The data mod's export: a rules line, then one "<itemId> <points>" line per armour piece or shield.
 void load_rules() {
-    wchar_t path[MAX_PATH];
-    DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
-    if (!n || n >= MAX_PATH) return;
-    wchar_t* slash = wcsrchr(path, L'\\');
-    if (!slash) return;
-    *slash = 0;
     wchar_t file[MAX_PATH];
-    if (swprintf(file, MAX_PATH, L"%s\\shroudforge\\exports\\warriors-poise\\poise.txt", path) <= 0) return;
+    if (!game_path(L"shroudforge\\exports\\warriors-poise\\poise.txt", file)) return;
     FILE* f = nullptr;
     if (_wfopen_s(&f, file, L"r") != 0 || !f) {
         log_line("poise off: no poise.txt export");
@@ -355,25 +365,75 @@ void load_rules() {
     log_line(text);
 }
 
+// The data layout: ShroudForge's dump of this executable, else the built-in values if this is a
+// tested executable, else nothing.
+bool find_layout(const wchar_t* exe) {
+    char text[512];
+    std::string sha = typedump::file_sha256(exe);
+    bool tested = false;
+    for (const char* t : typedump::kTestedExecutables) tested = tested || sha == t;
+    snprintf(text, sizeof text, "executable SHA-256 %s (%s)", sha.empty() ? "unreadable" : sha.c_str(),
+             tested ? "a build this version was tested on" : "not a build this version was tested on");
+    log_line(text);
+    std::string why;
+    if (!sha.empty() && typedump::load(exe, sha, g_layout, why)) return true;
+    snprintf(text, sizeof text, "type dump not used: %s", why.c_str());
+    log_line(text);
+    if (!tested) return false;
+    g_layout = typedump::tested_layout();
+    return true;
+}
+
 void start() {
     auto base = reinterpret_cast<unsigned char*>(GetModuleHandleW(nullptr));
     auto nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(base + reinterpret_cast<IMAGE_DOS_HEADER*>(base)->e_lfanew);
-    char host[MAX_PATH] = "?";
-    GetModuleFileNameA(nullptr, host, MAX_PATH);
-    const char* name = strrchr(host, '\\');
-    char text[MAX_PATH + 96];
-    snprintf(text, sizeof text, "warriors-poise-native %s loaded in %s, PE TimeDateStamp 0x%08X", kVersion, name ? name + 1 : host,
-             nt->FileHeader.TimeDateStamp);
+    wchar_t exe[MAX_PATH] = L"";
+    DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    if (!n || n >= MAX_PATH) exe[0] = 0;
+    const wchar_t* name = wcsrchr(exe, L'\\');
+    char text[600];
+    snprintf(text, sizeof text, "warriors-poise-native %s loaded in %ls, PE TimeDateStamp 0x%08X, image size %lu", kVersion,
+             name ? name + 1 : exe, nt->FileHeader.TimeDateStamp, nt->OptionalHeader.SizeOfImage);
     log_line(text);
     load_rules();
-    if (!g_rules.enabled) return;
-    unsigned char* site = find_hit_site(base);
-    if (!site) {
-        log_line("inactive: hit site not found (game version changed?), nothing patched");
+    if (!g_rules.enabled) return;  // nothing to do: the game's code is not even searched
+
+    // Data layout.
+    if (!exe[0] || !find_layout(exe)) {
+        log_line("inactive: no data layout for this game build (no matching ShroudForge type dump, not a tested build), nothing patched");
         return;
     }
-    snprintf(text, sizeof text, "%s at +0x%llX", install(site) ? "poise hook installed" : "poise hook FAILED to install",
-             static_cast<unsigned long long>(site - base));
+    snprintf(text, sizeof text, "layout (%s): Equipment %u B, impacts +%u, %u slots of %u B, item id +%u, main hand slot %u, shield slot %u; "
+                                "HitEvent target +0x%X, hit type +0x%X; Light %u Medium %u Heavy %u -> VeryLight %u",
+             g_layout.source.c_str(), g_layout.equipment_size, g_layout.impacts_at, g_layout.impact_slots, g_layout.impact_size,
+             g_layout.item_id_at, g_layout.weapon_slot, g_layout.shield_slot, g_layout.event_root_target, g_layout.event_hit_reaction,
+             g_layout.light, g_layout.medium, g_layout.heavy, g_layout.very_light);
+    log_line(text);
+    if (g_layout.impact_slots > kMaxSlots || g_layout.reactions.empty()) {
+        log_line("inactive: the layout has more equipment slots than this version handles, nothing patched");
+        return;
+    }
+
+    // Code.
+    autodetect::Image im;
+    if (!autodetect::open(base, im)) {
+        log_line("inactive: the game executable could not be read, nothing patched");
+        return;
+    }
+    std::vector<std::string> notes;
+    autodetect::detect(im, g_layout.event_hit_reaction, g_code, notes);
+    for (const std::string& line : notes) log_line(("rule " + line).c_str());
+    if (!g_code.ok) {
+        log_line("inactive: a rule found no single target (game changed?), nothing patched; hits stay vanilla");
+        return;
+    }
+    // Presence bits sit before the offset table; never read past either table.
+    uint32_t by_bits = (g_code.layout_offsets / 8) * 64, by_table = (g_code.layout_strides - g_code.layout_offsets) / 2;
+    g_max_components = by_bits < by_table ? by_bits : by_table;
+    if (g_max_components > kMaxComponentBits) g_max_components = kMaxComponentBits;
+
+    snprintf(text, sizeof text, "%s at +0x%X", install(base + g_code.hit_site) ? "poise hook installed" : "poise hook FAILED to install",
+             g_code.hit_site);
     log_line(text);
 }
 

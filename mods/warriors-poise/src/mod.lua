@@ -1,4 +1,4 @@
--- Warriors' Poise 0.5.0 beta (client and dedicated server, install it on both).
+-- Warriors' Poise 0.6.0 beta (client and dedicated server, install it on both).
 --
 --   * Swing cancel: vanilla locks block and dodge from the wind-up through the recovery. Here the
 --     lock covers only the swing itself: from SWING_LEAD_MS before the first hit to RECOVERY_MS
@@ -16,8 +16,11 @@
 -- runs after it and covers its armour variants too.
 --
 -- A feature that finds nothing to change only warns: error() fails the whole asset pass, the game
--- then starts on vanilla data, and vanilla data deletes Forged & Found's variant items. error() is
--- kept for a change that went wrong halfway, where the data would otherwise be left inconsistent.
+-- then starts on vanilla data, and vanilla data deletes Forged & Found's variant items. For the
+-- same reason every feature runs guarded (see guarded): after a game or loader update, a field
+-- that moved or an API that changed stops that feature with a warning, and the pass goes on.
+-- Only a change that went wrong halfway, where an attack's data would be left inconsistent, still
+-- fails the pass (broken()).
 
 local function log(msg) shroudforge.log.info("[warriors-poise] " .. msg) end
 local function warn_feature(msg) shroudforge.log.warn("[warriors-poise] " .. msg) end
@@ -27,14 +30,29 @@ if not loader.features.patch then
     return
 end
 
-local function feature(key) return shroudforge.settings.get(key, false) == true end
+-- Raised for data left inconsistent; guarded() lets it through and fails the pass.
+local function broken(msg) error({ broken = msg }) end
+
+local function guarded(name, fn, ...)
+    local ok, err = pcall(fn, ...)
+    if ok then return true end
+    if type(err) == "table" and err.broken then error("warriors-poise: " .. err.broken, 0) end
+    warn_feature(string.format("%s stopped by an error (game data or loader changed?), feature skipped: %s", name, tostring(err)))
+    return false
+end
+
+local function setting(key, fallback)
+    local ok, value = pcall(shroudforge.settings.get, key, fallback)
+    if ok and value ~= nil then return value end
+    return fallback
+end
+local function feature(key) return setting(key, false) == true end
+local function number_setting(key, fallback) return tonumber(setting(key, fallback)) or fallback end
 
 local SWING_CANCEL = feature("swingCancel")
 local ARMOUR_DEFENCE = feature("armourDefence")
-local ARMOUR_MULTIPLIER = tonumber(shroudforge.settings.get("armourDefenceMultiplier", 1.25)) or 1.25
+local ARMOUR_MULTIPLIER = number_setting("armourDefenceMultiplier", 1.25)
 local POISE = feature("poise")
-
-local function number_setting(key, fallback) return tonumber(shroudforge.settings.get(key, fallback)) or fallback end
 
 log(string.format("%s, features: swing cancel %s, armour defence %s (x%.2f), poise %s",
     loader.is_server and "dedicated server" or "client", SWING_CANCEL and "on" or "off",
@@ -162,10 +180,10 @@ local function patch_swing_cancel()
                         insert_lock_event(events, plan.disable_source, plan.from)
                         insert_lock_event(events, plan.enable_source, plan.to)
                         if not times_sorted(events) then
-                            error("warriors-poise: " .. sub.name .. " events are out of order")
+                            broken(sub.name .. " events are out of order")
                         end
                         if plan.disable_source.value.time.value ~= source_time then
-                            error("warriors-poise: inserting into " .. sub.name .. " changed the original event")
+                            broken("inserting into " .. sub.name .. " changed the original event")
                         end
                         changed = changed + 1
                         freed = freed + (plan.vanilla_end - plan.first_off) - (plan.to - plan.from)
@@ -268,7 +286,14 @@ local function export_poise()
         counts.medium, counts.light, counts.shield, counts.two_handed))
 end
 
-if SWING_CANCEL then patch_swing_cancel() end
-if ARMOUR_DEFENCE then patch_armour_defence(math.max(0, ARMOUR_MULTIPLIER)) end
-export_poise()
+-- What changed before an error keeps its change. At worst the attack being edited loses its block
+-- and dodge lock entirely (as with Combat Rebalanced); nothing is left half-written.
+if SWING_CANCEL then guarded("swing cancel", patch_swing_cancel) end
+if ARMOUR_DEFENCE then guarded("armour defence", patch_armour_defence, math.max(0, ARMOUR_MULTIPLIER)) end
+if not guarded("poise", export_poise) and loader.features.export then
+    -- An older export must not stay behind: the DLL would use it. Poise stays off this session.
+    if pcall(io.export, "warriors-poise/poise.txt", "poise 0 light=0 medium=0 heavy=0 refill=0\n") then
+        warn_feature("poise: export replaced by an empty one, the DLL stays off")
+    end
+end
 log("done")

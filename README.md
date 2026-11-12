@@ -51,8 +51,17 @@ committed only during the swing itself, and you recover sooner after it.
   armour variants get the same treatment.
 - Multiplayer: install the mod on the dedicated server and on every player's game (see below).
 
-After a game update the mod may need an update too. If poise can no longer find the code it needs,
-it stays off and says so in `shroudforge/logs/warriors-poise-native.log`. It does not crash the game.
+After a game update the mod is built to keep working without an update of its own, and to step aside
+safely when it cannot:
+
+- Poise does not depend on fixed addresses. It finds the game code it needs by its shape, and takes
+  the layout of the game's data (equipment, hits, hit types) from the type information ShroudForge
+  extracts from the exact game version you run. If anything is missing, ambiguous or unexpected,
+  poise stays off, hits behave as in the unmodded game, and
+  `shroudforge/logs/warriors-poise-native.log` says why.
+- Swing cancel and stronger armour change game data. If a game update changes that data in a way
+  they do not expect, the feature is skipped with a warning in ShroudForge's log, and the other
+  features and mods load normally.
 
 ## Install
 
@@ -110,7 +119,8 @@ Actions and publishes it as a release.
 | Path | Contents |
 |---|---|
 | `mods/warriors-poise/` | The ShroudForge package: `src/mod.lua` (attack timing, armour values, poise points) and the settings in `extended.mod.json` |
-| `native/warriors-poise-native/` | The DLL that spends and refills poise on every hit |
+| `native/warriors-poise-native/` | The DLL that spends and refills poise on every hit (`autodetect.h`: finding the game code; `typedump.h`: reading the data layout) |
+| `native/autodetect-test/` | Runs the DLL's detection on a game executable on disk: `native/build-autodetect-test.ps1`, then `autodetect-test <exe> [types-*.json]` |
 | `tools/` | Packaging |
 
 ## License
